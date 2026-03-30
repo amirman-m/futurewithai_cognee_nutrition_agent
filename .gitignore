@@ -1,0 +1,24 @@
+# ── Secrets ───────────────────────────────────────────────────────────────────
+# Never commit your real .env file — use .env.example as the template.
+.env
+
+# ── Python Runtime ────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+
+# ── Virtual Environment ───────────────────────────────────────────────────────
+venv/
+.venv/
+env/
+
+# ── Cognee Persistent Storage ─────────────────────────────────────────────────
+# Cognee writes its knowledge graph and vector index to disk here.
+# This folder can be large and is user-specific — do not commit it.
+.cognee_system/
+
+# ── IDE & OS Artifacts ────────────────────────────────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

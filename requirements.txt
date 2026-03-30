@@ -1,0 +1,32 @@
+# Core dependencies for the NutriAgent project.
+# Install with: pip install -r requirements.txt
+
+# ── Agent Core ────────────────────────────────────────────────────────────────
+
+# Cognee — knowledge graph + vector search memory layer
+cognee
+
+# LangGraph — typed state graph for agent orchestration
+langgraph
+
+# LangChain OpenAI adapter — connects LangGraph nodes to any OpenAI-compatible LLM
+langchain-openai
+
+# python-dotenv — loads .env variables into os.environ at runtime
+python-dotenv
+
+# ── Web Server (optional, for chat UI) ───────────────────────────────────────
+
+# FastAPI — modern async web framework
+fastapi
+
+# Uvicorn — ASGI server for FastAPI
+uvicorn[standard]
+
+# Pydantic — data validation (comes with FastAPI but explicit for clarity)
+pydantic
+
+# ── Local Embeddings (free alternative to OpenAI) ────────────────────────────
+
+# Sentence Transformers — local embedding models
+sentence-transformers

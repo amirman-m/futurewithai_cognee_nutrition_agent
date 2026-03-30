@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NutriAgent - AI Nutrition Assistant</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        /* Custom scrollbar for chat messages */
+        .chat-scroll::-webkit-scrollbar {
+            width: 6px;
+        }
+        .chat-scroll::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 10px;
+        }
+        .chat-scroll::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 10px;
+        }
+        .chat-scroll::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+        
+        /* Smooth message animations */
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        .message-enter {
+            animation: slideIn 0.3s ease-out;
+        }
+        
+        /* Typing indicator animation */
+        @keyframes pulse {
+            0%, 100% { opacity: 0.4; }
+            50% { opacity: 1; }
+        }
+        .typing-dot {
+            animation: pulse 1.4s infinite;
+        }
+        .typing-dot:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+        .typing-dot:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-green-50 to-blue-50 min-h-screen">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        function createUserId() {
+            return 'user_' + Math.random().toString(36).slice(2, 11);
+        }
+
+        // ── Main Chat Application Component ──────────────────────────────────
+        
+        function NutriAgentChat() {
+            const [messages, setMessages] = useState([]);
+            const [inputMessage, setInputMessage] = useState('');
+            const [isLoading, setIsLoading] = useState(false);
+            const [userId, setUserId] = useState('');
+            const [activeProfile, setActiveProfile] = useState(null);
+            const [profiles, setProfiles] = useState([]);
+            const [showOnboarding, setShowOnboarding] = useState(true);
+            const messagesEndRef = useRef(null);
+
+            const loadProfiles = async () => {
+                const response = await fetch('/api/profiles');
+                if (!response.ok) {
+                    throw new Error('Failed to load saved profiles');
+                }
+
+                const data = await response.json();
+                setProfiles(data);
+                return data;
+            };
+
+            const openProfile = (profile, options = {}) => {
+                const welcomeMessage = options.welcomeMessage || `Welcome back, ${profile.name}! I still remember your profile and nutrition history. What would you like to work on today?`;
+
+                setUserId(profile.user_id);
+                setActiveProfile(profile);
+                setShowOnboarding(false);
+                localStorage.setItem('nutriagent_user_id', profile.user_id);
+                setMessages([{
+                    role: 'assistant',
+                    content: welcomeMessage,
+                    timestamp: new Date().toISOString()
+                }]);
+            };
+
+            // Auto-scroll to bottom when new messages arrive
+            useEffect(() => {
+                messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+            }, [messages]);
+
+            // Load saved profiles and restore the previously selected profile if possible.
+            useEffect(() => {
+                const initialize = async () => {
+                    try {
+                        const savedProfiles = await loadProfiles();
+                        const storedUserId = localStorage.getItem('nutriagent_user_id');
+
+                        if (storedUserId) {
+                            const matchingProfile = savedProfiles.find(profile => profile.user_id === storedUserId);
+                            if (matchingProfile) {
+                                openProfile(matchingProfile);
+                                return;
+                            }
+                        }
+
+                        setUserId(createUserId());
+                        setShowOnboarding(true);
+                    } catch (error) {
+                        setUserId(createUserId());
+                        setShowOnboarding(true);
+                    }
+                };
+
+                initialize();
+            }, []);
+
+            const handleSelectExistingProfile = (profile) => {
+                openProfile(profile);
+            };
+
+            const handleCreateNewProfile = () => {
+                localStorage.removeItem('nutriagent_user_id');
+                setActiveProfile(null);
+                setUserId(createUserId());
+                setMessages([]);
+                setShowOnboarding(true);
+            };
+
+            const handleOnboardingComplete = async (profileData) => {
+                setIsLoading(true);
+                const nextUserId = userId || createUserId();
+
+                try {
+                    const response = await fetch('/api/profile', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            user_id: nextUserId,
+                            ...profileData
+                        })
+                    });
+
+                    if (!response.ok) {
+                        const errorData = await response.json().catch(() => ({}));
+                        throw new Error(errorData.detail || 'Failed to create profile');
+                    }
+
+                    const profile = {
+                        user_id: nextUserId,
+                        ...profileData,
+                        updated_at: new Date().toISOString()
+                    };
+
+                    await loadProfiles();
+                    openProfile(profile, {
+                        welcomeMessage: `Great to meet you, ${profileData.name}! I've saved your nutrition profile and will keep it separate from other users. What would you like to know?`
+                    });
+                } catch (error) {
+                    alert('Error creating profile: ' + error.message);
+                } finally {
+                    setIsLoading(false);
+                }
+            };
+
+            const sendMessage = async (e) => {
+                e.preventDefault();
+                if (!inputMessage.trim() || isLoading) return;
+
+                // Add user message to chat
+                const userMessage = {
+                    role: 'user',
+                    content: inputMessage,
+                    timestamp: new Date().toISOString()
+                };
+                setMessages(prev => [...prev, userMessage]);
+                setInputMessage('');
+                setIsLoading(true);
+
+                try {
+                    const response = await fetch('/api/chat', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            user_id: userId,
+                            message: inputMessage
+                        })
+                    });
+
+                    if (!response.ok) {
+                        const errorData = await response.json().catch(() => ({}));
+                        throw new Error(errorData.detail || 'Failed to get response');
+                    }
+
+                    const data = await response.json();
+                    
+                    // Add assistant response to chat
+                    setMessages(prev => [...prev, {
+                        role: 'assistant',
+                        content: data.response,
+                        timestamp: new Date().toISOString()
+                    }]);
+                } catch (error) {
+                    setMessages(prev => [...prev, {
+                        role: 'error',
+                        content: `Sorry, I encountered an error: ${error.message}`,
+                        timestamp: new Date().toISOString()
+                    }]);
+                } finally {
+                    setIsLoading(false);
+                }
+            };
+
+            const resetProfile = () => {
+                if (confirm('Switch user? Your saved profiles will remain available.')) {
+                    localStorage.removeItem('nutriagent_user_id');
+                    setUserId(createUserId());
+                    setActiveProfile(null);
+                    setMessages([]);
+                    setShowOnboarding(true);
+                }
+            };
+
+            if (showOnboarding) {
+                return (
+                    <OnboardingForm
+                        onComplete={handleOnboardingComplete}
+                        onSelectExisting={handleSelectExistingProfile}
+                        onCreateNew={handleCreateNewProfile}
+                        profiles={profiles}
+                        isLoading={isLoading}
+                    />
+                );
+            }
+
+            return (
+                <div className="flex flex-col h-screen max-w-4xl mx-auto p-4">
+                    {/* Header */}
+                    <div className="bg-white rounded-t-2xl shadow-lg p-6 border-b border-gray-200">
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <div className="w-12 h-12 bg-gradient-to-br from-green-400 to-blue-500 rounded-full flex items-center justify-center text-white text-2xl">
+                                    🥗
+                                </div>
+                                <div>
+                                    <h1 className="text-2xl font-bold text-gray-800">NutriAgent</h1>
+                                    <p className="text-sm text-gray-500">
+                                        {activeProfile ? `${activeProfile.name} (${activeProfile.user_id})` : 'Your AI Nutrition Assistant'}
+                                    </p>
+                                </div>
+                            </div>
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={handleCreateNewProfile}
+                                    className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
+                                >
+                                    Create Profile
+                                </button>
+                                <button
+                                    onClick={resetProfile}
+                                    className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
+                                >
+                                    Switch User
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Messages Container */}
+                    <div className="flex-1 bg-white shadow-lg overflow-y-auto chat-scroll p-6 space-y-4">
+                        {messages.map((msg, idx) => (
+                            <Message key={idx} message={msg} />
+                        ))}
+                        {isLoading && <TypingIndicator />}
+                        <div ref={messagesEndRef} />
+                    </div>
+
+                    {/* Input Form */}
+                    <form onSubmit={sendMessage} className="bg-white rounded-b-2xl shadow-lg p-6 border-t border-gray-200">
+                        <div className="flex gap-3">
+                            <input
+                                type="text"
+                                value={inputMessage}
+                                onChange={(e) => setInputMessage(e.target.value)}
+                                placeholder="Ask about nutrition, meals, or dietary advice..."
+                                className="flex-1 px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                                disabled={isLoading}
+                            />
+                            <button
+                                type="submit"
+                                disabled={isLoading || !inputMessage.trim()}
+                                className="px-6 py-3 bg-gradient-to-r from-green-500 to-blue-500 text-white rounded-xl font-medium hover:from-green-600 hover:to-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                            >
+                                Send
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            );
+        }
+
+        // ── Message Component ────────────────────────────────────────────────
+
+        function Message({ message }) {
+            const isUser = message.role === 'user';
+            const isError = message.role === 'error';
+
+            return (
+                <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} message-enter`}>
+                    <div className={`max-w-[80%] rounded-2xl px-4 py-3 ${
+                        isUser 
+                            ? 'bg-gradient-to-r from-green-500 to-blue-500 text-white' 
+                            : isError
+                            ? 'bg-red-100 text-red-800 border border-red-300'
+                            : 'bg-gray-100 text-gray-800'
+                    }`}>
+                        <p className="whitespace-pre-wrap">{message.content}</p>
+                    </div>
+                </div>
+            );
+        }
+
+        // ── Typing Indicator ─────────────────────────────────────────────────
+
+        function TypingIndicator() {
+            return (
+                <div className="flex justify-start message-enter">
+                    <div className="bg-gray-100 rounded-2xl px-4 py-3">
+                        <div className="flex gap-1">
+                            <div className="w-2 h-2 bg-gray-400 rounded-full typing-dot"></div>
+                            <div className="w-2 h-2 bg-gray-400 rounded-full typing-dot"></div>
+                            <div className="w-2 h-2 bg-gray-400 rounded-full typing-dot"></div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // ── Onboarding Form ──────────────────────────────────────────────────
+
+        function OnboardingForm({ onComplete, onSelectExisting, onCreateNew, profiles, isLoading }) {
+            const [formData, setFormData] = useState({
+                name: '',
+                calorie_goal: 2000,
+                restrictions: [],
+                allergies: [],
+                goals: ''
+            });
+
+            const commonRestrictions = ['vegetarian', 'vegan', 'gluten-free', 'dairy-free', 'keto', 'paleo'];
+            const commonAllergies = ['peanuts', 'tree nuts', 'dairy', 'eggs', 'soy', 'shellfish', 'wheat'];
+
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                if (!formData.name.trim()) {
+                    alert('Please enter your name');
+                    return;
+                }
+                onComplete(formData);
+            };
+
+            const toggleItem = (field, item) => {
+                setFormData(prev => ({
+                    ...prev,
+                    [field]: prev[field].includes(item)
+                        ? prev[field].filter(i => i !== item)
+                        : [...prev[field], item]
+                }));
+            };
+
+            return (
+                <div className="min-h-screen flex items-center justify-center p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-2xl w-full">
+                        <div className="text-center mb-8">
+                            <div className="w-20 h-20 bg-gradient-to-br from-green-400 to-blue-500 rounded-full flex items-center justify-center text-white text-4xl mx-auto mb-4">
+                                🥗
+                            </div>
+                            <h1 className="text-3xl font-bold text-gray-800 mb-2">Welcome to NutriAgent</h1>
+                            <p className="text-gray-600">Let's set up your personalized nutrition profile</p>
+                        </div>
+
+                        {profiles.length > 0 && (
+                            <div className="mb-8 p-4 bg-blue-50 border border-blue-100 rounded-2xl">
+                                <div className="flex items-center justify-between mb-3">
+                                    <h2 className="text-lg font-semibold text-gray-800">Saved profiles</h2>
+                                    <button
+                                        type="button"
+                                        onClick={onCreateNew}
+                                        className="text-sm font-medium text-blue-600 hover:text-blue-700"
+                                    >
+                                        Create another profile
+                                    </button>
+                                </div>
+                                <div className="space-y-3">
+                                    {profiles.map(profile => (
+                                        <button
+                                            key={profile.user_id}
+                                            type="button"
+                                            onClick={() => onSelectExisting(profile)}
+                                            className="w-full text-left p-4 bg-white rounded-xl border border-gray-200 hover:border-blue-300 hover:shadow-sm transition-all"
+                                        >
+                                            <div className="flex items-start justify-between gap-3">
+                                                <div>
+                                                    <p className="font-semibold text-gray-800">{profile.name}</p>
+                                                    <p className="text-sm text-gray-500">{profile.user_id}</p>
+                                                </div>
+                                                <span className="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded-full">
+                                                    Open
+                                                </span>
+                                            </div>
+                                            <p className="text-sm text-gray-600 mt-2">
+                                                Goal: {profile.goals || 'general wellness'}
+                                            </p>
+                                            <p className="text-xs text-gray-500 mt-1">
+                                                Restrictions: {profile.restrictions.length ? profile.restrictions.join(', ') : 'none'}
+                                            </p>
+                                        </button>
+                                    ))}
+                                </div>
+                                <p className="text-xs text-gray-500 mt-3">
+                                    Choose a saved profile to prove the agent remembers different users after restart.
+                                </p>
+                            </div>
+                        )}
+
+                        <form onSubmit={handleSubmit} className="space-y-6">
+                            {/* Name */}
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    What's your name?
+                                </label>
+                                <input
+                                    type="text"
+                                    value={formData.name}
+                                    onChange={(e) => setFormData({...formData, name: e.target.value})}
+                                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500"
+                                    placeholder="Enter your name"
+                                    required
+                                />
+                            </div>
+
+                            {/* Calorie Goal */}
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    Daily calorie goal
+                                </label>
+                                <input
+                                    type="number"
+                                    value={formData.calorie_goal}
+                                    onChange={(e) => setFormData({...formData, calorie_goal: parseInt(e.target.value)})}
+                                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500"
+                                    min="1000"
+                                    max="5000"
+                                />
+                            </div>
+
+                            {/* Dietary Restrictions */}
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    Dietary restrictions (select all that apply)
+                                </label>
+                                <div className="flex flex-wrap gap-2">
+                                    {commonRestrictions.map(item => (
+                                        <button
+                                            key={item}
+                                            type="button"
+                                            onClick={() => toggleItem('restrictions', item)}
+                                            className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
+                                                formData.restrictions.includes(item)
+                                                    ? 'bg-green-500 text-white'
+                                                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                            }`}
+                                        >
+                                            {item}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Allergies */}
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    Allergies (select all that apply)
+                                </label>
+                                <div className="flex flex-wrap gap-2">
+                                    {commonAllergies.map(item => (
+                                        <button
+                                            key={item}
+                                            type="button"
+                                            onClick={() => toggleItem('allergies', item)}
+                                            className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
+                                                formData.allergies.includes(item)
+                                                    ? 'bg-red-500 text-white'
+                                                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                            }`}
+                                        >
+                                            {item}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Health Goals */}
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    What are your health goals?
+                                </label>
+                                <textarea
+                                    value={formData.goals}
+                                    onChange={(e) => setFormData({...formData, goals: e.target.value})}
+                                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500"
+                                    rows="3"
+                                    placeholder="e.g., lose weight, build muscle, improve gut health..."
+                                />
+                            </div>
+
+                            {/* Submit Button */}
+                            <button
+                                type="submit"
+                                disabled={isLoading}
+                                className="w-full py-4 bg-gradient-to-r from-green-500 to-blue-500 text-white rounded-xl font-semibold text-lg hover:from-green-600 hover:to-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                            >
+                                {isLoading ? 'Creating your profile...' : 'Start chatting'}
+                            </button>
+                        </form>
+
+                        <p className="text-center text-sm text-gray-500 mt-6">
+                            Your profile is stored securely and will be remembered across sessions
+                        </p>
+                    </div>
+                </div>
+            );
+        }
+
+        // ── Render App ───────────────────────────────────────────────────────
+
+        ReactDOM.render(<NutriAgentChat />, document.getElementById('root'));
+    </script>
+</body>
+</html>
