@@ -22,3 +22,6 @@ env/
 .idea/
 .DS_Store
 Thumbs.db
+
+# ── User Memory Store (runtime data, never commit) ──────────────────────────
+.memory_store/
